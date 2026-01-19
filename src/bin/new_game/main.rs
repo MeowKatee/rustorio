@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::sync::LazyLock;
+
 use rustorio::{
     self, Bundle, Resource, ResourceType, Tick,
     buildings::Furnace,
@@ -17,7 +19,11 @@ fn main() {
     rustorio::play::<GameMode>(user_main);
 }
 
-const MAX_MINER: u32 = 5;
+const IRON_BUILD_FUR: u32 = 10;
+static MAX_MINER: LazyLock<u32> =
+    LazyLock::new(|| option_env!("MAX_MINER").unwrap_or("20").parse().unwrap());
+static MAX_FURNACE: LazyLock<usize> =
+    LazyLock::new(|| option_env!("MAX_FURNACE").unwrap_or("12").parse().unwrap());
 
 fn wait_for_resource<O: ResourceType, const N: u32>(
     territory: &mut Territory<O>,
@@ -65,6 +71,7 @@ where
     fur.outputs(&tick).access_res().bundle().unwrap()
 }
 
+#[allow(unused)]
 fn earn_resource<R: FurnaceRecipe, const N: u32>(
     fur: &mut Furnace<R>,
     territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
@@ -79,8 +86,6 @@ where
     wait_output(fur, tick)
 }
 
-const IRON_BUILD_FUR: u32 = 10;
-
 fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
     let mut initial = vec![(AMOUNT as usize / furs_num) as u32; furs_num];
     initial
@@ -91,7 +96,7 @@ fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
 }
 
 fn earn_resource_parallel<R: FurnaceRecipe, const N: u32>(
-    furs: &[&mut Furnace<R>],
+    mut furs: Vec<&mut Furnace<R>>,
     territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
     tick: &mut Tick,
 ) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
@@ -100,8 +105,31 @@ where
     R::Outputs: ResTuple,
 {
     let arangement = calculate_requirement::<N>(furs.len());
+    let mut material = wait_for_resource::<_, N>(territory, tick).to_resource();
 
-    unimplemented!()
+    for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
+        let material = material.split_off(res_num).unwrap();
+        assign_furnance(fur, tick, material);
+    }
+
+    while !tick.advance_until(
+        |tick| {
+            furs.iter_mut()
+                .zip(arangement.iter())
+                .all(|(fur, &arrangement)| fur.outputs(tick).access_res().amount() >= arrangement)
+        },
+        100,
+    ) {}
+
+    let mut res_total = Resource::new_empty();
+    for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
+        let Ok(res) = fur.outputs(tick).access_res().split_off(res_num) else {
+            continue;
+        };
+        res_total.add(res);
+    }
+
+    res_total.bundle().unwrap()
 }
 
 // TODO:
@@ -113,14 +141,14 @@ fn build_miner(
     copper_territory: &mut Territory<CopperOre>,
     mut furs: Vec<Furnace<IronSmelting>>,
 ) -> (Miner, Vec<Furnace<IronSmelting>>) {
-    if iron_territory.resources(tick).amount() >= IRON_BUILD_FUR {
+    while iron_territory.resources(tick).amount() >= IRON_BUILD_FUR && furs.len() < *MAX_FURNACE {
         let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-        let iron = earn_resource_parallel(&furs_ref, iron_territory, tick);
+        let iron = earn_resource_parallel(furs_ref, iron_territory, tick);
         furs.push(Furnace::build(tick, IronSmelting, iron));
     }
-    
+
     let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-    let iron = earn_resource_parallel(&furs_ref, iron_territory, tick);
+    let iron = earn_resource_parallel(furs_ref, iron_territory, tick);
 
     let mut furs = furs
         .into_iter()
@@ -128,8 +156,8 @@ fn build_miner(
         .flatten()
         .collect::<Vec<_>>();
 
-    let copper =
-        earn_resource_parallel(&furs.iter_mut().collect::<Vec<_>>(), copper_territory, tick);
+    let furs_ref = furs.iter_mut().collect::<Vec<_>>();
+    let copper = earn_resource_parallel(furs_ref, copper_territory, tick);
 
     let furs = furs
         .into_iter()
@@ -151,16 +179,21 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
     let mut furs = vec![Furnace::build(&tick, IronSmelting, iron)];
 
     // allocate max mines for both resource.
-    for i in 0..2 * MAX_MINER {
+    let max_miner = *MAX_MINER;
+
+    assert!(max_miner <= copper_territory.max_miners());
+    assert!(max_miner <= iron_territory.max_miners());
+
+    for i in 0..2 * max_miner {
         let (miner, furs_) =
             build_miner(&mut tick, &mut iron_territory, &mut copper_territory, furs);
         furs = furs_;
 
         // policy to allocate miners
         if i % 2 == 0 {
-            _ = copper_territory.add_miner(&tick, miner);
+            copper_territory.add_miner(&tick, miner).unwrap();
         } else {
-            _ = iron_territory.add_miner(&tick, miner);
+            iron_territory.add_miner(&tick, miner).unwrap();
         }
     }
 
