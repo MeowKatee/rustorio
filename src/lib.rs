@@ -50,9 +50,10 @@ fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
     initial
 }
 
-fn earn_resource_parallel<R: FurnaceRecipe, const N: u32>(
+/// 1 -> 1 ore mining + smelting
+pub fn craft_resource_parallel<R: FurnaceRecipe, const N: u32>(
     mut furs: Vec<&mut Furnace<R>>,
-    territory: &mut Territory<<R::Inputs as ResTuple1>::RESOURCE>,
+    res: Bundle<<R::Inputs as ResTuple1>::RESOURCE, N>,
     tick: &mut Tick,
 ) -> Bundle<<R::Outputs as ResTuple1>::RESOURCE, N>
 where
@@ -60,7 +61,7 @@ where
     R::Outputs: ResTuple1,
 {
     let arangement = calculate_requirement::<N>(furs.len());
-    let mut material = wait_for_resource::<_, N>(territory, tick).to_resource();
+    let mut material = res.to_resource();
 
     for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
         let material = material.split_off(res_num).unwrap();
@@ -96,12 +97,14 @@ pub fn build_miner(
 ) -> (Miner, Vec<Furnace<IronSmelting>>) {
     while iron_territory.resources(tick).amount() >= IRON_BUILD_FUR && furs.len() < *MAX_FURNACE {
         let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-        let iron = earn_resource_parallel(furs_ref, iron_territory, tick);
+        let res = wait_for_resource(iron_territory, tick);
+        let iron = craft_resource_parallel(furs_ref, res, tick);
         furs.push(Furnace::build(tick, IronSmelting, iron));
     }
 
     let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-    let iron = earn_resource_parallel(furs_ref, iron_territory, tick);
+    let res = wait_for_resource(iron_territory, tick);
+    let iron = craft_resource_parallel(furs_ref, res, tick);
 
     let mut furs = furs
         .into_iter()
@@ -110,7 +113,8 @@ pub fn build_miner(
         .collect::<Vec<_>>();
 
     let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-    let copper = earn_resource_parallel(furs_ref, copper_territory, tick);
+    let res = wait_for_resource(copper_territory, tick);
+    let copper = craft_resource_parallel(furs_ref, res, tick);
 
     let furs = furs
         .into_iter()
