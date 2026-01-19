@@ -4,8 +4,8 @@
 
 use std::sync::LazyLock;
 
-use rustorio::buildings::Furnace;
-use rustorio::recipes::{CopperSmelting, FurnaceRecipe, IronSmelting};
+use rustorio::buildings::{Assembler, Furnace};
+use rustorio::recipes::{AssemblerRecipe, CopperSmelting, FurnaceRecipe, IronSmelting};
 use rustorio::resources::{CopperOre, IronOre};
 use rustorio::territory::{Miner, Territory};
 use rustorio::{self, Bundle, Resource, ResourceType, Tick};
@@ -46,20 +46,21 @@ fn assign_furnance<R: FurnaceRecipe>(
     fur.inputs(&tick).access_res().add(res);
 }
 
-fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
-    let mut initial = vec![(AMOUNT as usize / furs_num) as u32; furs_num];
+fn calculate_requirement<const AMOUNT: u32>(machine_num: usize) -> Vec<u32> {
+    let mut initial = vec![(AMOUNT as usize / machine_num) as u32; machine_num];
     initial
         .iter_mut()
-        .take(AMOUNT as usize % furs_num)
+        .take(AMOUNT as usize % machine_num)
         .for_each(|i| *i += 1);
     initial
 }
 
 /// any crafting in parallel
-pub fn craft_resource_parallel<R: FurnaceRecipe, const N: u32>(
+pub fn smelting_parallel_1to1<R: FurnaceRecipe, const N: u32>(
     furs: &mut [Furnace<R>],
     res: Bundle<<R::Inputs as ResTuple1>::ResType, { N * R::InputBundle::RES_AMOUNT }>,
     tick: &mut Tick,
+    show_time: bool,
 ) -> Bundle<<R::Outputs as ResTuple1>::ResType, N>
 where
     R::Inputs: ResTuple1,
@@ -67,13 +68,16 @@ where
     R::InputBundle: ResBundleTuple1,
     R::OutputBundle: ResBundleTuple1,
 {
+    let start_tick = tick.cur();
+
+    let in_factor = R::InputBundle::RES_AMOUNT;
+    let out_factor = R::OutputBundle::RES_AMOUNT;
+
     let arangement = calculate_requirement::<N>(furs.len());
     let mut material = res.to_resource();
 
     for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
-        let material = material
-            .split_off(res_num * R::InputBundle::RES_AMOUNT)
-            .unwrap();
+        let material = material.split_off(res_num * in_factor).unwrap();
         assign_furnance(fur, tick, material);
     }
 
@@ -82,7 +86,7 @@ where
             furs.iter_mut()
                 .zip(arangement.iter())
                 .all(|(fur, &res_num)| {
-                    fur.outputs(tick).access_res().amount() >= res_num * R::OutputBundle::RES_AMOUNT
+                    fur.outputs(tick).access_res().amount() >= res_num * out_factor
                 })
         },
         100,
@@ -93,14 +97,40 @@ where
         let Ok(res) = fur
             .outputs(tick)
             .access_res()
-            .split_off(res_num * R::OutputBundle::RES_AMOUNT)
+            .split_off(res_num * out_factor)
         else {
             continue;
         };
         res_total.add(res);
     }
-
+    if show_time {
+        println!(
+            "Smelting {} cost {} ticks",
+            res_total,
+            tick.cur() - start_tick
+        );
+    }
     res_total.bundle().unwrap()
+}
+
+pub fn assemble_parallel_2to1<R: AssemblerRecipe, const N: u32>(
+    asems: &mut [Assembler<R>],
+    res1: Bundle<<R::Inputs as ResTuple2>::ResType1, { N * R::InputBundle::RES_AMOUNT1 }>,
+    res2: Bundle<<R::Inputs as ResTuple2>::ResType2, { N * R::InputBundle::RES_AMOUNT2 }>,
+    tick: &mut Tick,
+    show_time: bool,
+) -> Bundle<<R::Outputs as ResTuple1>::ResType, N>
+where
+    R::Inputs: ResTuple2,
+    R::Outputs: ResTuple1,
+    R::InputBundle: ResBundleTuple2,
+    R::OutputBundle: ResBundleTuple1,
+{
+    let in1_factor = R::InputBundle::RES_AMOUNT1;
+    let in2_factor = R::InputBundle::RES_AMOUNT2;
+    let out_factor = R::OutputBundle::RES_AMOUNT;
+
+    unimplemented!()
 }
 
 /// build miner, prepare iron & copper parallelly
@@ -112,16 +142,16 @@ pub fn build_miner(
 ) -> (Miner, Vec<Furnace<IronSmelting>>) {
     while iron_territory.resources(tick).amount() >= IRON_BUILD_FUR && furs.len() < *MAX_FURNACE {
         let res = mine_resource(iron_territory, tick);
-        let iron = craft_resource_parallel(&mut furs, res, tick);
+        let iron = smelting_parallel_1to1(&mut furs, res, tick, false);
         furs.push(Furnace::build(tick, IronSmelting, iron));
     }
 
     let res = mine_resource(iron_territory, tick);
-    let iron = craft_resource_parallel(&mut furs, res, tick);
+    let iron = smelting_parallel_1to1(&mut furs, res, tick, false);
 
     let mut furs = change_recipe(furs, CopperSmelting);
     let res = mine_resource(copper_territory, tick);
-    let copper = craft_resource_parallel(&mut furs, res, tick);
+    let copper = smelting_parallel_1to1(&mut furs, res, tick, false);
 
     let furs = change_recipe(furs, IronSmelting);
     (Miner::build(iron, copper), furs)
