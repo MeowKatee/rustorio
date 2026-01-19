@@ -2,7 +2,9 @@
 
 use rustorio::buildings::{Assembler, Furnace};
 use rustorio::gamemodes::Standard;
-use rustorio::recipes::{CopperSmelting, CopperWireRecipe, ElectronicCircuitRecipe, IronSmelting};
+use rustorio::recipes::{
+    CopperSmelting, CopperWireRecipe, ElectronicCircuitRecipe, IronSmelting, PointRecipe,
+};
 use rustorio::resources::{CopperOre, IronOre, Point};
 use rustorio::territory::Territory;
 use rustorio::{Bundle, HandRecipe, Resource, Tick};
@@ -50,8 +52,15 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
     let time = tick.cur();
     println!("Cost {time} ticks to initialize {max_miner} miners and {max_furnace} furnances");
 
-    let (_furs, assembler) =
+    let iron_ore = mine_resource(&mut iron_territory, &mut tick);
+    let iron = smelting_parallel_1to1::<_, 1000>(&mut furs, iron_ore, &mut tick, true);
+
+    let (mut furs, assembler) =
         bootstrap_assembler(&mut iron_territory, &mut copper_territory, furs, &mut tick);
+
+    let copper_ore = mine_resource(&mut copper_territory, &mut tick);
+    let copper = smelting_parallel_1to1::<_, 800>(&mut furs, copper_ore, &mut tick, true);
+
     let _assem = assembler.change_recipe(ElectronicCircuitRecipe).unwrap();
 
     todo!("Return the `tick` and the victory resources to win the game!")

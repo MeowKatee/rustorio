@@ -35,26 +35,6 @@ pub fn mine_resource<const N: u32, O: ResourceType>(
     }
 }
 
-// Helper function for abstracted furnace use
-fn assign_furnance<R: FurnaceRecipe>(
-    fur: &mut Furnace<R>,
-    tick: &Tick,
-    res: Resource<<R::Inputs as ResTuple1>::ResType>,
-) where
-    R::Inputs: ResTuple1,
-{
-    fur.inputs(&tick).access_res().add(res);
-}
-
-fn calculate_requirement<const AMOUNT: u32>(machine_num: usize) -> Vec<u32> {
-    let mut initial = vec![(AMOUNT as usize / machine_num) as u32; machine_num];
-    initial
-        .iter_mut()
-        .take(AMOUNT as usize % machine_num)
-        .for_each(|i| *i += 1);
-    initial
-}
-
 /// any crafting in parallel
 pub fn smelting_parallel_1to1<R: FurnaceRecipe, const N: u32>(
     furs: &mut [Furnace<R>],
@@ -114,11 +94,10 @@ where
 }
 
 pub fn assemble_parallel_2to1<R: AssemblerRecipe, const N: u32>(
-    asems: &mut [Assembler<R>],
+    assems: &mut [Assembler<R>],
     res1: Bundle<<R::Inputs as ResTuple2>::ResType1, { N * R::InputBundle::RES_AMOUNT1 }>,
     res2: Bundle<<R::Inputs as ResTuple2>::ResType2, { N * R::InputBundle::RES_AMOUNT2 }>,
     tick: &mut Tick,
-    show_time: bool,
 ) -> Bundle<<R::Outputs as ResTuple1>::ResType, N>
 where
     R::Inputs: ResTuple2,
@@ -130,7 +109,42 @@ where
     let in2_factor = R::InputBundle::RES_AMOUNT2;
     let out_factor = R::OutputBundle::RES_AMOUNT;
 
-    unimplemented!()
+    let base_arangement = calculate_requirement::<N>(assems.len());
+    let mut material1 = res1.to_resource();
+    let mut material2 = res2.to_resource();
+
+    for (assem, &res_num) in assems.iter_mut().zip(base_arangement.iter()) {
+        let material1 = material1.split_off(res_num * in1_factor).unwrap();
+        let material2 = material2.split_off(res_num * in2_factor).unwrap();
+        assem.inputs(tick).access_res1().add(material1);
+        assem.inputs(tick).access_res2().add(material2);
+    }
+
+    while !tick.advance_until(
+        |tick| {
+            assems
+                .iter_mut()
+                .zip(base_arangement.iter())
+                .all(|(assem, &res_num)| {
+                    assem.outputs(tick).access_res().amount() >= res_num * out_factor
+                })
+        },
+        100,
+    ) {}
+
+    let mut res_total = Resource::new_empty();
+    for (assem, &res_num) in assems.iter_mut().zip(base_arangement.iter()) {
+        let Ok(res) = assem
+            .outputs(tick)
+            .access_res()
+            .split_off(res_num * out_factor)
+        else {
+            continue;
+        };
+        res_total.add(res);
+    }
+
+    res_total.bundle().unwrap()
 }
 
 /// build miner, prepare iron & copper parallelly
@@ -168,4 +182,24 @@ where
         .map(|fur| fur.change_recipe(new_recipe))
         .flatten()
         .collect::<Vec<_>>()
+}
+
+// Helper function for abstracted furnace use
+fn assign_furnance<R: FurnaceRecipe>(
+    fur: &mut Furnace<R>,
+    tick: &Tick,
+    res: Resource<<R::Inputs as ResTuple1>::ResType>,
+) where
+    R::Inputs: ResTuple1,
+{
+    fur.inputs(&tick).access_res().add(res);
+}
+
+fn calculate_requirement<const AMOUNT: u32>(machine_num: usize) -> Vec<u32> {
+    let mut initial = vec![(AMOUNT as usize / machine_num) as u32; machine_num];
+    initial
+        .iter_mut()
+        .take(AMOUNT as usize % machine_num)
+        .for_each(|i| *i += 1);
+    initial
 }
