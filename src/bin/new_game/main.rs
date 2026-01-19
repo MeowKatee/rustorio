@@ -17,7 +17,7 @@ fn main() {
     rustorio::play::<GameMode>(user_main);
 }
 
-const MAX_MINER: u32 = 20;
+const MAX_MINER: u32 = 5;
 
 fn wait_for_resource<O: ResourceType, const N: u32>(
     territory: &mut Territory<O>,
@@ -74,9 +74,20 @@ where
     R::Inputs: ResTuple,
     R::Outputs: ResTuple,
 {
-    let material = wait_for_resource::<_, N>(territory, tick);
-    assign_furnance(fur, tick, material.to_resource());
+    let material = wait_for_resource::<_, N>(territory, tick).to_resource();
+    assign_furnance(fur, tick, material);
     wait_output(fur, tick)
+}
+
+const IRON_BUILD_FUR: u32 = 10;
+
+fn calculate_requirement(furs_num: usize, amount: usize) -> Vec<u32> {
+    let mut initial = vec![(amount / furs_num) as u32; furs_num];
+    initial
+        .iter_mut()
+        .take(amount % furs_num)
+        .for_each(|i| *i += 1);
+    initial
 }
 
 // TODO:
@@ -86,9 +97,18 @@ fn build_miner(
     tick: &mut Tick,
     iron_territory: &mut Territory<IronOre>,
     copper_territory: &mut Territory<CopperOre>,
-    mut fur: Vec<Furnace<IronSmelting>>,
-) -> (Vec<Furnace<IronSmelting>>, Miner) {
-    let mut fur = fur.pop().unwrap();
+    furs: &mut Vec<Option<Furnace<IronSmelting>>>,
+) -> Miner {
+    let mut fur = furs[0].take().unwrap();
+
+    if iron_territory.resources(tick).amount() >= IRON_BUILD_FUR {
+        let iron = earn_resource(&mut fur, iron_territory, tick);
+        furs.push(Some(Furnace::build(tick, IronSmelting, iron)));
+    }
+
+    let iron_assignment = calculate_requirement(furs.len(), 10);
+    let copper_assignment = calculate_requirement(furs.len(), 5);
+    println!("{iron_assignment:?}, {copper_assignment:?}");
 
     let iron = earn_resource(&mut fur, iron_territory, tick);
 
@@ -102,7 +122,8 @@ fn build_miner(
         panic!()
     };
 
-    (vec![fur], Miner::build(iron, copper))
+    furs[0] = Some(fur);
+    Miner::build(iron, copper)
 }
 
 fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bundle<Point, 200>) {
@@ -113,12 +134,16 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
         steel_technology: _,
     } = starting_resources;
 
-    let mut fur = vec![Furnace::build(&tick, IronSmelting, iron)];
+    let mut furs = vec![Some(Furnace::build(&tick, IronSmelting, iron))];
 
     // allocate max mines for both resource.
     for i in 0..2 * MAX_MINER {
-        let (fur_, miner) = build_miner(&mut tick, &mut iron_territory, &mut copper_territory, fur);
-        fur = fur_;
+        let miner = build_miner(
+            &mut tick,
+            &mut iron_territory,
+            &mut copper_territory,
+            &mut furs,
+        );
 
         // policy to allocate miners
         if i % 2 == 0 {
