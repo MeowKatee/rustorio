@@ -81,13 +81,27 @@ where
 
 const IRON_BUILD_FUR: u32 = 10;
 
-fn calculate_requirement(furs_num: usize, amount: usize) -> Vec<u32> {
-    let mut initial = vec![(amount / furs_num) as u32; furs_num];
+fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
+    let mut initial = vec![(AMOUNT as usize / furs_num) as u32; furs_num];
     initial
         .iter_mut()
-        .take(amount % furs_num)
+        .take(AMOUNT as usize % furs_num)
         .for_each(|i| *i += 1);
     initial
+}
+
+fn earn_resource_parallel<R: FurnaceRecipe, const N: u32>(
+    furs: &[&mut Furnace<R>],
+    territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
+    tick: &mut Tick,
+) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
+where
+    R::Inputs: ResTuple,
+    R::Outputs: ResTuple,
+{
+    let arangement = calculate_requirement::<N>(furs.len());
+
+    unimplemented!()
 }
 
 // TODO:
@@ -97,33 +111,33 @@ fn build_miner(
     tick: &mut Tick,
     iron_territory: &mut Territory<IronOre>,
     copper_territory: &mut Territory<CopperOre>,
-    furs: &mut Vec<Option<Furnace<IronSmelting>>>,
-) -> Miner {
-    let mut fur = furs[0].take().unwrap();
-
+    mut furs: Vec<Furnace<IronSmelting>>,
+) -> (Miner, Vec<Furnace<IronSmelting>>) {
     if iron_territory.resources(tick).amount() >= IRON_BUILD_FUR {
-        let iron = earn_resource(&mut fur, iron_territory, tick);
-        furs.push(Some(Furnace::build(tick, IronSmelting, iron)));
+        let furs_ref = furs.iter_mut().collect::<Vec<_>>();
+        let iron = earn_resource_parallel(&furs_ref, iron_territory, tick);
+        furs.push(Furnace::build(tick, IronSmelting, iron));
     }
+    
+    let furs_ref = furs.iter_mut().collect::<Vec<_>>();
+    let iron = earn_resource_parallel(&furs_ref, iron_territory, tick);
 
-    let iron_assignment = calculate_requirement(furs.len(), 10);
-    let copper_assignment = calculate_requirement(furs.len(), 5);
-    println!("{iron_assignment:?}, {copper_assignment:?}");
+    let mut furs = furs
+        .into_iter()
+        .map(|fur| fur.change_recipe(CopperSmelting))
+        .flatten()
+        .collect::<Vec<_>>();
 
-    let iron = earn_resource(&mut fur, iron_territory, tick);
+    let copper =
+        earn_resource_parallel(&furs.iter_mut().collect::<Vec<_>>(), copper_territory, tick);
 
-    let Ok(mut fur) = fur.change_recipe(CopperSmelting) else {
-        panic!()
-    };
+    let furs = furs
+        .into_iter()
+        .map(|fur| fur.change_recipe(IronSmelting))
+        .flatten()
+        .collect::<Vec<_>>();
 
-    let copper = earn_resource(&mut fur, copper_territory, tick);
-
-    let Ok(fur) = fur.change_recipe(IronSmelting) else {
-        panic!()
-    };
-
-    furs[0] = Some(fur);
-    Miner::build(iron, copper)
+    (Miner::build(iron, copper), furs)
 }
 
 fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bundle<Point, 200>) {
@@ -134,16 +148,13 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
         steel_technology: _,
     } = starting_resources;
 
-    let mut furs = vec![Some(Furnace::build(&tick, IronSmelting, iron))];
+    let mut furs = vec![Furnace::build(&tick, IronSmelting, iron)];
 
     // allocate max mines for both resource.
     for i in 0..2 * MAX_MINER {
-        let miner = build_miner(
-            &mut tick,
-            &mut iron_territory,
-            &mut copper_territory,
-            &mut furs,
-        );
+        let (miner, furs_) =
+            build_miner(&mut tick, &mut iron_territory, &mut copper_territory, furs);
+        furs = furs_;
 
         // policy to allocate miners
         if i % 2 == 0 {
