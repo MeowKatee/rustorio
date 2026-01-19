@@ -52,7 +52,7 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
 
     let iron_ore = mine_resource(&mut iron_territory, &mut tick);
 
-    const ASSEMBLER_NUM: u32 = 10;
+    const ASSEMBLER_NUM: u32 = 100;
 
     let mut iron: Resource<Iron> = smelting_parallel_1to1::<_, { 1000 + 6 * ASSEMBLER_NUM }>(
         &mut furs, iron_ore, &mut tick, true,
@@ -68,7 +68,8 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
     .to_resource();
 
     let mut assems = vec![];
-    
+
+    let time = tick.cur();
     for _ in 0..ASSEMBLER_NUM {
         let iron = iron.bundle().unwrap();
         let copper = copper.bundle().unwrap();
@@ -93,6 +94,11 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
             ));
         }
     }
+
+    println!(
+        "Cost {} ticks to bootstrap {ASSEMBLER_NUM} assemblers",
+        tick.cur() - time
+    );
 
     todo!("Return the `tick` and the victory resources to win the game!")
 }
