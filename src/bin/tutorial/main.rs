@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-use rustorio::{
-    self, Bundle, Tick, buildings::Furnace, gamemodes::Tutorial, recipes::CopperSmelting,
-    resources::Copper,
-};
+use rustorio::buildings::Furnace;
+use rustorio::gamemodes::Tutorial;
+use rustorio::recipes::CopperSmelting;
+use rustorio::resources::Copper;
+use rustorio::{self, Bundle, Tick};
 
 type GameMode = Tutorial;
 

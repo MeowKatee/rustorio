@@ -2,15 +2,13 @@
 
 use rustorio::buildings::{Assembler, Furnace};
 use rustorio::gamemodes::Standard;
-use rustorio::recipes::{
-    CopperSmelting, CopperWireRecipe, ElectronicCircuitRecipe, IronSmelting, PointRecipe,
-};
-use rustorio::resources::{CopperOre, IronOre, Point};
-use rustorio::territory::Territory;
+use rustorio::recipes::{CopperSmelting, CopperWireRecipe, IronSmelting};
+use rustorio::resources::{Copper, Iron, Point};
 use rustorio::{Bundle, HandRecipe, Resource, Tick};
 
 use rustorio_game::{
-    MAX_FURNACE, MAX_MINER, build_miner, change_recipe, mine_resource, smelting_parallel_1to1,
+    MAX_FURNACE, MAX_MINER, assemble_parallel_1to1, build_miner, change_recipe, mine_resource,
+    smelting_parallel_1to1,
 };
 
 type GameMode = Standard;
@@ -53,36 +51,61 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
     println!("Cost {time} ticks to initialize {max_miner} miners and {max_furnace} furnances");
 
     let iron_ore = mine_resource(&mut iron_territory, &mut tick);
-    let iron = smelting_parallel_1to1::<_, 1000>(&mut furs, iron_ore, &mut tick, true);
 
-    let (mut furs, assembler) =
-        bootstrap_assembler(&mut iron_territory, &mut copper_territory, furs, &mut tick);
+    const ASSEMBLER_NUM: u32 = 10;
+
+    let mut iron: Resource<Iron> = smelting_parallel_1to1::<_, { 1000 + 6 * ASSEMBLER_NUM }>(
+        &mut furs, iron_ore, &mut tick, true,
+    )
+    .to_resource();
+
+    let mut furs = change_recipe(furs, CopperSmelting);
 
     let copper_ore = mine_resource(&mut copper_territory, &mut tick);
-    let copper = smelting_parallel_1to1::<_, 800>(&mut furs, copper_ore, &mut tick, true);
+    let mut copper = smelting_parallel_1to1::<_, { 800 + 6 * ASSEMBLER_NUM }>(
+        &mut furs, copper_ore, &mut tick, true,
+    )
+    .to_resource();
 
-    let _assem = assembler.change_recipe(ElectronicCircuitRecipe).unwrap();
+    let mut assems = vec![];
+    
+    for _ in 0..ASSEMBLER_NUM {
+        let iron = iron.bundle().unwrap();
+        let copper = copper.bundle().unwrap();
+
+        if assems.is_empty() {
+            assems.push(bootstrap_assembler(iron, copper, &mut tick));
+        } else {
+            let copper_wires = assemble_parallel_1to1::<_, 6>(
+                &mut assems,
+                copper.to_resource().bundle().unwrap(),
+                &mut tick,
+            )
+            .to_resource()
+            .bundle()
+            .unwrap();
+
+            assems.push(Assembler::build(
+                &tick,
+                CopperWireRecipe,
+                copper_wires,
+                iron,
+            ));
+        }
+    }
 
     todo!("Return the `tick` and the victory resources to win the game!")
 }
 
 fn bootstrap_assembler(
-    iron_territory: &mut Territory<IronOre>,
-    copper_territory: &mut Territory<CopperOre>,
-    mut furs: Vec<Furnace<IronSmelting>>,
+    iron: Bundle<Iron, 6>,
+    copper: Bundle<Copper, 12>,
     tick: &mut Tick,
-) -> (Vec<Furnace<CopperSmelting>>, Assembler<CopperWireRecipe>) {
-    let iron_ore = mine_resource(iron_territory, tick);
-    let iron = smelting_parallel_1to1(&mut furs, iron_ore, tick, true);
-
-    let copper_ore = mine_resource::<6, _>(copper_territory, tick);
-    let mut furs = change_recipe(furs, CopperSmelting);
-    let mut copper = smelting_parallel_1to1::<CopperSmelting, 6>(&mut furs, copper_ore, tick, true)
-        .to_resource();
-
+) -> Assembler<CopperWireRecipe> {
+    let mut coppers = copper.to_resource();
     let mut copper_wires = Resource::new_empty();
     let time = tick.cur();
-    while let Ok(copper) = copper.bundle() {
+    while let Ok(copper) = coppers.bundle() {
         copper_wires.add(
             <CopperWireRecipe as HandRecipe>::craft(tick, (copper,))
                 .0
@@ -90,14 +113,10 @@ fn bootstrap_assembler(
         );
     }
 
-    println!("Cost {} ticks to craft wires", tick.cur() - time);
-
-    let assem = Assembler::build(
-        &tick,
-        CopperWireRecipe,
-        copper_wires.bundle().unwrap(),
-        iron,
+    println!(
+        "Cost {} ticks to bootstrap first assember",
+        tick.cur() - time
     );
 
-    (furs, assem)
+    Assembler::build(tick, CopperWireRecipe, copper_wires.bundle().unwrap(), iron)
 }
