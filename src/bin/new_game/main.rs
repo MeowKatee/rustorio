@@ -17,9 +17,6 @@ fn main() {
     rustorio::play::<GameMode>(user_main);
 }
 
-const IRON_AMOUNT: u32 = 10;
-const COPPER_AMOUNT: u32 = 5;
-
 const MAX_MINER: u32 = 20;
 
 fn wait_for_resource<O: ResourceType, const N: u32>(
@@ -47,7 +44,6 @@ impl<R: ResourceType> ResTuple for (Resource<R>,) {
 }
 
 // Helper function for abstracted furnace use
-#[allow(unused)]
 fn assign_furnance<R: FurnaceRecipe>(
     fur: &mut Furnace<R>,
     tick: &Tick,
@@ -69,6 +65,20 @@ where
     fur.outputs(&tick).access_res().bundle().unwrap()
 }
 
+fn earn_resource<R: FurnaceRecipe, const N: u32>(
+    fur: &mut Furnace<R>,
+    territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
+    tick: &mut Tick,
+) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
+where
+    R::Inputs: ResTuple,
+    R::Outputs: ResTuple,
+{
+    let material = wait_for_resource::<_, N>(territory, tick);
+    assign_furnance(fur, tick, material.to_resource());
+    wait_output(fur, tick)
+}
+
 // TODO:
 //  - split resources
 //  - parallel smelting
@@ -78,19 +88,15 @@ fn build_miner(
     copper_territory: &mut Territory<CopperOre>,
     mut fur: Vec<Furnace<IronSmelting>>,
 ) -> (Vec<Furnace<IronSmelting>>, Miner) {
-    let iron_ore = wait_for_resource::<_, IRON_AMOUNT>(iron_territory, tick);
-    let copper_ore = wait_for_resource::<_, COPPER_AMOUNT>(copper_territory, tick);
-
     let mut fur = fur.pop().unwrap();
-    assign_furnance(&mut fur, tick, iron_ore.to_resource());
-    let iron = wait_output(&mut fur, tick);
+
+    let iron = earn_resource(&mut fur, iron_territory, tick);
 
     let Ok(mut fur) = fur.change_recipe(CopperSmelting) else {
         panic!()
     };
 
-    assign_furnance(&mut fur, tick, copper_ore.to_resource());
-    let copper = wait_output(&mut fur, tick);
+    let copper = earn_resource(&mut fur, copper_territory, tick);
 
     let Ok(fur) = fur.change_recipe(IronSmelting) else {
         panic!()
