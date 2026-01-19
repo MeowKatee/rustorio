@@ -58,6 +58,17 @@ fn assign_furnance<R: FurnaceRecipe>(
     fur.inputs(&tick).access_res().add(res);
 }
 
+fn wait_output<R: FurnaceRecipe, const N: u32>(
+    fur: &mut Furnace<R>,
+    tick: &mut Tick,
+) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
+where
+    R::Outputs: ResTuple,
+{
+    while !tick.advance_until(|tick| fur.outputs(tick).access_res().amount() >= N, 100) {}
+    fur.outputs(&tick).access_res().bundle().unwrap()
+}
+
 // TODO:
 //  - split resources
 //  - parallel smelting
@@ -68,44 +79,24 @@ fn build_miner(
     mut fur: Vec<Furnace<IronSmelting>>,
 ) -> (Vec<Furnace<IronSmelting>>, Miner) {
     let iron_ore = wait_for_resource::<_, IRON_AMOUNT>(iron_territory, tick);
-    let copper_ore = wait_for_resource::<_, 5>(copper_territory, tick);
+    let copper_ore = wait_for_resource::<_, COPPER_AMOUNT>(copper_territory, tick);
 
     let mut fur = fur.pop().unwrap();
-    fur.inputs(tick).0.add(iron_ore);
-    while !tick.advance_until(|tick| fur.outputs(tick).0.amount() == IRON_AMOUNT, 100) {}
-    let mut iron_recipe = fur
-        .outputs(tick)
-        .0
-        .bundle::<IRON_AMOUNT>()
-        .unwrap()
-        .to_resource();
+    assign_furnance(&mut fur, tick, iron_ore.to_resource());
+    let iron = wait_output(&mut fur, tick);
 
     let Ok(mut fur) = fur.change_recipe(CopperSmelting) else {
         panic!()
     };
 
-    fur.inputs(tick).0.add(copper_ore);
-    while !tick.advance_until(|tick| fur.outputs(tick).0.amount() == COPPER_AMOUNT, 100) {}
-    let mut copper_recipe = fur
-        .outputs(tick)
-        .0
-        .bundle::<COPPER_AMOUNT>()
-        .unwrap()
-        .to_resource();
-
-    let miner = if let Ok(copper) = copper_recipe.bundle::<5>()
-        && let Ok(iron) = iron_recipe.bundle::<10>()
-    {
-        Miner::build(iron, copper)
-    } else {
-        panic!();
-    };
+    assign_furnance(&mut fur, tick, copper_ore.to_resource());
+    let copper = wait_output(&mut fur, tick);
 
     let Ok(fur) = fur.change_recipe(IronSmelting) else {
         panic!()
     };
 
-    (vec![fur], miner)
+    (vec![fur], Miner::build(iron, copper))
 }
 
 fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bundle<Point, 200>) {
