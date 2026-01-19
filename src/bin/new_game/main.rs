@@ -34,6 +34,9 @@ fn wait_for_resource<O: ResourceType, const N: u32>(
     }
 }
 
+// TODO:
+//  - split resources
+//  - parallel smelting
 fn build_miner(
     tick: &mut Tick,
     iron_territory: &mut Territory<IronOre>,
