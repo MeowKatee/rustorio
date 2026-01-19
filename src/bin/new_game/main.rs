@@ -23,7 +23,7 @@ const IRON_BUILD_FUR: u32 = 10;
 static MAX_MINER: LazyLock<u32> =
     LazyLock::new(|| option_env!("MAX_MINER").unwrap_or("20").parse().unwrap());
 static MAX_FURNACE: LazyLock<usize> =
-    LazyLock::new(|| option_env!("MAX_FURNACE").unwrap_or("12").parse().unwrap());
+    LazyLock::new(|| option_env!("MAX_FURNACE").unwrap_or("10").parse().unwrap());
 
 fn wait_for_resource<O: ResourceType, const N: u32>(
     territory: &mut Territory<O>,
