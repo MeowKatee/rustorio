@@ -8,6 +8,9 @@ use rustorio::resources::{CopperOre, IronOre};
 use rustorio::territory::{Miner, Territory};
 use rustorio::{self, Bundle, Resource, ResourceType, Tick};
 
+mod typing;
+pub use typing::{ResTuple1, ResTuple2, ResTuple3, ResTuple4};
+
 pub static MAX_MINER: LazyLock<u32> =
     LazyLock::new(|| option_env!("MAX_MINER").unwrap_or("20").parse().unwrap());
 pub static MAX_FURNACE: LazyLock<usize> =
@@ -27,25 +30,13 @@ fn wait_for_resource<O: ResourceType, const N: u32>(
     }
 }
 
-trait ResTuple {
-    type RESOURCE: ResourceType;
-    fn access_res(&mut self) -> &mut Resource<Self::RESOURCE>;
-}
-
-impl<R: ResourceType> ResTuple for (Resource<R>,) {
-    type RESOURCE = R;
-    fn access_res(&mut self) -> &mut Resource<Self::RESOURCE> {
-        &mut self.0
-    }
-}
-
 // Helper function for abstracted furnace use
 fn assign_furnance<R: FurnaceRecipe>(
     fur: &mut Furnace<R>,
     tick: &Tick,
-    res: Resource<<R::Inputs as ResTuple>::RESOURCE>,
+    res: Resource<<R::Inputs as ResTuple1>::RESOURCE>,
 ) where
-    R::Inputs: ResTuple,
+    R::Inputs: ResTuple1,
 {
     fur.inputs(&tick).access_res().add(res);
 }
@@ -61,12 +52,12 @@ fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
 
 fn earn_resource_parallel<R: FurnaceRecipe, const N: u32>(
     mut furs: Vec<&mut Furnace<R>>,
-    territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
+    territory: &mut Territory<<R::Inputs as ResTuple1>::RESOURCE>,
     tick: &mut Tick,
-) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
+) -> Bundle<<R::Outputs as ResTuple1>::RESOURCE, N>
 where
-    R::Inputs: ResTuple,
-    R::Outputs: ResTuple,
+    R::Inputs: ResTuple1,
+    R::Outputs: ResTuple1,
 {
     let arangement = calculate_requirement::<N>(furs.len());
     let mut material = wait_for_resource::<_, N>(territory, tick).to_resource();
