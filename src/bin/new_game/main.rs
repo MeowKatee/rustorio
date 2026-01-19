@@ -38,11 +38,12 @@ fn build_miner(
     tick: &mut Tick,
     iron_territory: &mut Territory<IronOre>,
     copper_territory: &mut Territory<CopperOre>,
-    mut fur: Furnace<IronSmelting>,
-) -> (Furnace<IronSmelting>, Miner) {
+    mut fur: Vec<Furnace<IronSmelting>>,
+) -> (Vec<Furnace<IronSmelting>>, Miner) {
     let iron_ore = wait_for_resource::<_, IRON_AMOUNT>(iron_territory, tick);
     let copper_ore = wait_for_resource::<_, 5>(copper_territory, tick);
 
+    let mut fur = fur.pop().unwrap();
     fur.inputs(tick).0.add(iron_ore);
     while !tick.advance_until(|tick| fur.outputs(tick).0.amount() == IRON_AMOUNT, 100) {}
     let mut iron_recipe = fur
@@ -77,7 +78,7 @@ fn build_miner(
         panic!()
     };
 
-    (fur, miner)
+    (vec![fur], miner)
 }
 
 fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bundle<Point, 200>) {
@@ -88,7 +89,7 @@ fn user_main(mut tick: Tick, starting_resources: StartingResources) -> (Tick, Bu
         steel_technology: _,
     } = starting_resources;
 
-    let mut fur = Furnace::build(&tick, IronSmelting, iron);
+    let mut fur = vec![Furnace::build(&tick, IronSmelting, iron)];
 
     // allocate max mines for both resource.
     for i in 0..2 * MAX_MINER {
