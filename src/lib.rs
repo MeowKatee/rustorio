@@ -23,7 +23,7 @@ pub static MAX_FURNACE: LazyLock<usize> =
 
 const IRON_BUILD_FUR: u32 = 10;
 
-fn wait_for_resource<O: ResourceType, const N: u32>(
+pub fn mine_resource<const N: u32, O: ResourceType>(
     territory: &mut Territory<O>,
     tick: &mut Tick,
 ) -> Bundle<O, N> {
@@ -57,7 +57,7 @@ fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
 
 /// any crafting in parallel
 pub fn craft_resource_parallel<R: FurnaceRecipe, const N: u32>(
-    mut furs: Vec<&mut Furnace<R>>,
+    furs: &mut [Furnace<R>],
     res: Bundle<<R::Inputs as ResTuple1>::ResType, { N * R::InputBundle::RES_AMOUNT }>,
     tick: &mut Tick,
 ) -> Bundle<<R::Outputs as ResTuple1>::ResType, N>
@@ -111,31 +111,31 @@ pub fn build_miner(
     mut furs: Vec<Furnace<IronSmelting>>,
 ) -> (Miner, Vec<Furnace<IronSmelting>>) {
     while iron_territory.resources(tick).amount() >= IRON_BUILD_FUR && furs.len() < *MAX_FURNACE {
-        let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-        let res = wait_for_resource(iron_territory, tick);
-        let iron = craft_resource_parallel(furs_ref, res, tick);
+        let res = mine_resource(iron_territory, tick);
+        let iron = craft_resource_parallel(&mut furs, res, tick);
         furs.push(Furnace::build(tick, IronSmelting, iron));
     }
 
-    let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-    let res = wait_for_resource(iron_territory, tick);
-    let iron = craft_resource_parallel(furs_ref, res, tick);
+    let res = mine_resource(iron_territory, tick);
+    let iron = craft_resource_parallel(&mut furs, res, tick);
 
-    let mut furs = furs
-        .into_iter()
-        .map(|fur| fur.change_recipe(CopperSmelting))
-        .flatten()
-        .collect::<Vec<_>>();
+    let mut furs = change_recipe(furs, CopperSmelting);
+    let res = mine_resource(copper_territory, tick);
+    let copper = craft_resource_parallel(&mut furs, res, tick);
 
-    let furs_ref = furs.iter_mut().collect::<Vec<_>>();
-    let res = wait_for_resource(copper_territory, tick);
-    let copper = craft_resource_parallel(furs_ref, res, tick);
-
-    let furs = furs
-        .into_iter()
-        .map(|fur| fur.change_recipe(IronSmelting))
-        .flatten()
-        .collect::<Vec<_>>();
-
+    let furs = change_recipe(furs, IronSmelting);
     (Miner::build(iron, copper), furs)
+}
+
+pub fn change_recipe<Recipe>(
+    furs: Vec<Furnace<impl FurnaceRecipe>>,
+    new_recipe: Recipe,
+) -> Vec<Furnace<Recipe>>
+where
+    Recipe: FurnaceRecipe + Copy,
+{
+    furs.into_iter()
+        .map(|fur| fur.change_recipe(new_recipe))
+        .flatten()
+        .collect::<Vec<_>>()
 }
