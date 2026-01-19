@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
 use rustorio::{
-    self, Bundle, ResourceType, Tick,
+    self, Bundle, Resource, ResourceType, Tick,
     buildings::Furnace,
     gamemodes::Standard,
-    recipes::{CopperSmelting, IronSmelting},
+    recipes::{CopperSmelting, FurnaceRecipe, IronSmelting},
     resources::{CopperOre, IronOre, Point},
     territory::{Miner, Territory},
 };
@@ -32,6 +32,30 @@ fn wait_for_resource<O: ResourceType, const N: u32>(
         while !tick.advance_until(|tick| territory.resources(tick).amount() >= N, 100) {}
         territory.resources(tick).bundle().unwrap()
     }
+}
+
+trait ResTuple {
+    type RESOURCE: ResourceType;
+    fn access_res(&mut self) -> &mut Resource<Self::RESOURCE>;
+}
+
+impl<R: ResourceType> ResTuple for (Resource<R>,) {
+    type RESOURCE = R;
+    fn access_res(&mut self) -> &mut Resource<Self::RESOURCE> {
+        &mut self.0
+    }
+}
+
+// Helper function for abstracted furnace use
+#[allow(unused)]
+fn assign_furnance<R: FurnaceRecipe>(
+    fur: &mut Furnace<R>,
+    tick: &Tick,
+    res: Resource<<R::Inputs as ResTuple>::RESOURCE>,
+) where
+    R::Inputs: ResTuple,
+{
+    fur.inputs(&tick).access_res().add(res);
 }
 
 // TODO:
