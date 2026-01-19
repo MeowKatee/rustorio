@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 
 use std::sync::LazyLock;
 
@@ -9,7 +11,10 @@ use rustorio::territory::{Miner, Territory};
 use rustorio::{self, Bundle, Resource, ResourceType, Tick};
 
 mod typing;
-pub use typing::{ResTuple1, ResTuple2, ResTuple3, ResTuple4};
+pub use typing::{
+    ResBundleTuple1, ResBundleTuple2, ResBundleTuple3, ResBundleTuple4, ResTuple1, ResTuple2,
+    ResTuple3, ResTuple4,
+};
 
 pub static MAX_MINER: LazyLock<u32> =
     LazyLock::new(|| option_env!("MAX_MINER").unwrap_or("20").parse().unwrap());
@@ -34,7 +39,7 @@ fn wait_for_resource<O: ResourceType, const N: u32>(
 fn assign_furnance<R: FurnaceRecipe>(
     fur: &mut Furnace<R>,
     tick: &Tick,
-    res: Resource<<R::Inputs as ResTuple1>::RESOURCE>,
+    res: Resource<<R::Inputs as ResTuple1>::ResType>,
 ) where
     R::Inputs: ResTuple1,
 {
@@ -50,21 +55,25 @@ fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
     initial
 }
 
-/// 1 -> 1 ore mining + smelting
+/// any crafting in parallel
 pub fn craft_resource_parallel<R: FurnaceRecipe, const N: u32>(
     mut furs: Vec<&mut Furnace<R>>,
-    res: Bundle<<R::Inputs as ResTuple1>::RESOURCE, N>,
+    res: Bundle<<R::Inputs as ResTuple1>::ResType, { N * R::InputBundle::RES_AMOUNT }>,
     tick: &mut Tick,
-) -> Bundle<<R::Outputs as ResTuple1>::RESOURCE, N>
+) -> Bundle<<R::Outputs as ResTuple1>::ResType, N>
 where
     R::Inputs: ResTuple1,
     R::Outputs: ResTuple1,
+    R::InputBundle: ResBundleTuple1,
+    R::OutputBundle: ResBundleTuple1,
 {
     let arangement = calculate_requirement::<N>(furs.len());
     let mut material = res.to_resource();
 
     for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
-        let material = material.split_off(res_num).unwrap();
+        let material = material
+            .split_off(res_num * R::InputBundle::RES_AMOUNT)
+            .unwrap();
         assign_furnance(fur, tick, material);
     }
 
@@ -72,14 +81,20 @@ where
         |tick| {
             furs.iter_mut()
                 .zip(arangement.iter())
-                .all(|(fur, &arrangement)| fur.outputs(tick).access_res().amount() >= arrangement)
+                .all(|(fur, &res_num)| {
+                    fur.outputs(tick).access_res().amount() >= res_num * R::OutputBundle::RES_AMOUNT
+                })
         },
         100,
     ) {}
 
     let mut res_total = Resource::new_empty();
     for (fur, &res_num) in furs.iter_mut().zip(arangement.iter()) {
-        let Ok(res) = fur.outputs(tick).access_res().split_off(res_num) else {
+        let Ok(res) = fur
+            .outputs(tick)
+            .access_res()
+            .split_off(res_num * R::OutputBundle::RES_AMOUNT)
+        else {
             continue;
         };
         res_total.add(res);
