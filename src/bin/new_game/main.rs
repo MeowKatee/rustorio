@@ -60,32 +60,6 @@ fn assign_furnance<R: FurnaceRecipe>(
     fur.inputs(&tick).access_res().add(res);
 }
 
-fn wait_output<R: FurnaceRecipe, const N: u32>(
-    fur: &mut Furnace<R>,
-    tick: &mut Tick,
-) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
-where
-    R::Outputs: ResTuple,
-{
-    while !tick.advance_until(|tick| fur.outputs(tick).access_res().amount() >= N, 100) {}
-    fur.outputs(&tick).access_res().bundle().unwrap()
-}
-
-#[allow(unused)]
-fn earn_resource<R: FurnaceRecipe, const N: u32>(
-    fur: &mut Furnace<R>,
-    territory: &mut Territory<<R::Inputs as ResTuple>::RESOURCE>,
-    tick: &mut Tick,
-) -> Bundle<<R::Outputs as ResTuple>::RESOURCE, N>
-where
-    R::Inputs: ResTuple,
-    R::Outputs: ResTuple,
-{
-    let material = wait_for_resource::<_, N>(territory, tick).to_resource();
-    assign_furnance(fur, tick, material);
-    wait_output(fur, tick)
-}
-
 fn calculate_requirement<const AMOUNT: u32>(furs_num: usize) -> Vec<u32> {
     let mut initial = vec![(AMOUNT as usize / furs_num) as u32; furs_num];
     initial
